@@ -4,8 +4,9 @@ const ejs = require("ejs")
 const bodyParser = require("body-parser")
 const mongoose = require("mongoose")
 const encrypt = require('mongoose-encryption');
-const md5 = require("md5");
+const bcrypt = require("bcrypt");
 const { log } = require('console');
+const saltRound = 10;
 
 const app = express()
 
@@ -53,32 +54,54 @@ app.get("/register" , (req , res)=>{
 
 /*---------------------------------------------------------POST REQUESTS----------------------------------------------------------*/
 
-app.post("/register" , (req , res)=>{
-    const newUser = new user({
-        email: req.body.username,
-        password: md5(req.body.password)
-    });
+app.post("/register" , async(req , res)=>{
+    
 
-    try{
-        newUser.save();
-        res.render("secrets");
-    }catch(err){
-        console.log(err);
-    }
+    try {
+        bcrypt.hash(req.body.password , saltRound , (err , hash)=>{
+            newUser = new user({
+                email: req.body.username,
+                password: hash
+            });
+            try{
+                newUser.save();
+                res.render("secrets");
+            }catch(err){
+                console.log("New User Saving error"+err);
+            }
+        })
+    } catch (err) {
+        console.log("Bcrypt error:" + err);
+    }    
 });
 
 app.post("/login" , async(req, res)=>{
     const userName = req.body.username;
-    const password = md5(req.body.password)
+    const password = req.body.password;
+
+    
 
     try{
         await user.findOne({email:userName})
         .then((user)=>{
-            if((user.password) === password){
-                res.render("secrets");
-            }else{
-                console.log("Wrong Password");
+
+            try {
+                bcrypt.compare(password , user.password , (err , result)=>{
+                    if(result == true){
+                        res.render("secrets");
+                    }else{
+                        console.log("Wrong Password");
+                    }
+                })
+            } catch (err) {
+                console.log("bcrypt.compare error: " + err);
             }
+
+            // if((user.password) === password){
+            //     res.render("secrets");
+            // }else{
+            //     console.log("Wrong Password");
+            // }
         });
         
     }catch(err){
