@@ -1,12 +1,11 @@
 require('dotenv').config();
 const express = require("express")
-const ejs = require("ejs")
 const bodyParser = require("body-parser")
 const mongoose = require("mongoose")
-const encrypt = require('mongoose-encryption');
-const bcrypt = require("bcrypt");
-const { log } = require('console');
-const saltRound = 10;
+const session = require('express-session');
+const passport = require('passport')
+const passportLocalMongoose = require('passport-local-mongoose');
+
 
 const app = express()
 
@@ -15,6 +14,15 @@ app.set('view engine' , 'ejs');
 app.use(bodyParser.urlencoded({
     extended:true
 }));
+
+app.use(session({
+    secret: process.env.SECRET,
+    resave: false,
+    saveUninitialized: false
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 try {
     mongoose.connect("mongodb://0.0.0.0:27017/secrets").then(()=>{
@@ -29,17 +37,27 @@ const userSchema = new mongoose.Schema({
     password: String
 });
 
+userSchema.plugin(passportLocalMongoose);
+
 // userSchema.plugin(encrypt , {
 //     secret:process.env.SECRET,
 //     encryptedFields: ["password"]
 // });
 
 
-const user = new mongoose.model("users" , userSchema , "users");
+const User = new mongoose.model("users" , userSchema , "users");
 
+passport.use(User.createStrategy());
+
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 /*---------------------------------------------------------GET REQUESTS----------------------------------------------------------*/
 
 app.get("/" , (req , res)=>{
+    res.redirect("/home");
+});
+
+app.get("/home" , (req , res)=>{
     res.render("home");
 });
 
@@ -51,63 +69,60 @@ app.get("/register" , (req , res)=>{
     res.render("register");
 });
 
+app.get("/secrets" , (req , res)=>{
+    if(req.isAuthenticated()){
+        res.render("secrets");
+    }else{
+        res.redirect("/login")
+    }
+});
+
+app.get("/logout" , (req , res)=>{
+    req.logOut((err)=>{
+        if(err){
+            console.log(err);
+        }else{
+            res.redirect("/home");
+        }
+    });
+    // res.render("home");
+});
 
 /*---------------------------------------------------------POST REQUESTS----------------------------------------------------------*/
 
 app.post("/register" , async(req , res)=>{
-    
-
-    try {
-        bcrypt.hash(req.body.password , saltRound , (err , hash)=>{
-            newUser = new user({
-                email: req.body.username,
-                password: hash
+    User.register({username: req.body.username} , req.body.password , (err , user)=>{
+        if(err){
+            console.log("Error in Register" , err);
+            res.redirect('/register')
+        }else{
+            passport.authenticate("local")(req , res , ()=>{
+                console.log(user);
+                res.redirect("/secrets")
             });
-            try{
-                newUser.save();
-                res.render("secrets");
-            }catch(err){
-                console.log("New User Saving error"+err);
-            }
-        })
-    } catch (err) {
-        console.log("Bcrypt error:" + err);
-    }    
+        }
+    })
 });
 
 app.post("/login" , async(req, res)=>{
-    const userName = req.body.username;
-    const password = req.body.password;
-
-    
-
-    try{
-        await user.findOne({email:userName})
-        .then((user)=>{
-
+    const user = new User({
+        username: req.body.username,
+        password: req.body.password
+    });
+    req.login(user , (err)=>{
+        if(err){
+            console.log("Login Post err: ");
+        }else{
             try {
-                bcrypt.compare(password , user.password , (err , result)=>{
-                    if(result == true){
-                        res.render("secrets");
-                    }else{
-                        console.log("Wrong Password");
-                    }
-                })
-            } catch (err) {
-                console.log("bcrypt.compare error: " + err);
+                passport.authenticate("local")(req , res , ()=>{
+                    res.redirect("/secrets")
+                });
+            } catch (error) {
+                console.log(error);
             }
-
-            // if((user.password) === password){
-            //     res.render("secrets");
-            // }else{
-            //     console.log("Wrong Password");
-            // }
-        });
-        
-    }catch(err){
-        console.log(err);
-    }
-})
+        }
+    })
+});
 
 app.listen(3000 , ()=>{
     console.log("server is running in the port 3000");
