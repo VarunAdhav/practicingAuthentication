@@ -7,7 +7,7 @@ const passport = require('passport')
 const passportLocalMongoose = require('passport-local-mongoose');
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const findOrCreate = require("mongoose-findorcreate");
-
+const FacebookStrategy = require("passport-facebook").Strategy;
 
 const app = express()
 
@@ -39,7 +39,9 @@ try {
 const userSchema = new mongoose.Schema({
     email: String,
     password: String,
-    googleId: String
+    googleId: String,
+    facebookId: String,
+    secret: String
 });
 
 userSchema.plugin(passportLocalMongoose);
@@ -71,6 +73,8 @@ passport.serializeUser(function(user, cb) {
     });
   });
 
+  /*---------------------------------------------------------GOOGLE----------------------------------------------------------*/
+
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -79,11 +83,29 @@ passport.use(new GoogleStrategy({
   },
   function(accessToken, refreshToken, profile, cb) {
     console.log(profile);
-    User.findOrCreate({ googleId: profile.id }, function (err, user) {
+    console.log(profile.emails[0].value);
+    User.findOrCreate({username: profile.emails[0].value,googleId: profile.id }, function (err, user) {
       return cb(err, user);
     });
   }
 ));
+/*---------------------------------------------------------GOOGLE----------------------------------------------------------*/
+
+/*---------------------------------------------------------FACEBOOK----------------------------------------------------------*/
+passport.use(new FacebookStrategy({
+    clientID: process.env.FB_APP_ID,
+    clientSecret: process.env.FB_APP_SECRET,
+    callbackURL: "http://localhost:3000/auth/facebook/callback"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    console.log("FaceBook Profile" , profile.id);
+    User.findOrCreate({ facebookId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
+/*---------------------------------------------------------FACEBOOK----------------------------------------------------------*/
+
 
 
 /*---------------------------------------------------------GET REQUESTS----------------------------------------------------------*/
@@ -104,12 +126,16 @@ app.get("/register" , (req , res)=>{
     res.render("register");
 });
 
-app.get("/secrets" , (req , res)=>{
-    if(req.isAuthenticated()){
-        res.render("secrets");
-    }else{
-        res.redirect("/login")
-    }
+app.get("/secrets" , async(req , res)=>{
+    // if(req.isAuthenticated()){
+    //     res.render("secrets");
+    // }else{
+    //     res.redirect("/login")
+    // }
+    await User.find({"secret": {$ne:null}}).then((data)=>{
+        // console.log(data);
+        res.render("secrets" , {userWithSecrets: data});
+    });
 });
 
 app.get("/logout" , (req , res)=>{
@@ -124,13 +150,30 @@ app.get("/logout" , (req , res)=>{
 });
 
 app.get("/auth/google",
-  passport.authenticate('google', { scope: ["profile"]})
+  passport.authenticate('google', { scope: ["profile" , "email"]})
 );
 
 app.get("/auth/google/secrets", 
   passport.authenticate('google', { failureRedirect: '/login' }),(req, res)=>{
     res.redirect('/secrets');
   });
+
+app.get('/auth/facebook', passport.authenticate('facebook' , { scope: ["profile"]}));
+
+app.get('/auth/facebook/secrets',
+  passport.authenticate('facebook', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect('/secrets');
+});
+
+app.get("/submit" , (req , res)=>{
+    if(req.isAuthenticated()){
+        res.render("submit");
+    }else{
+        res.redirect("/login");
+    }
+});
 
 /*---------------------------------------------------------POST REQUESTS----------------------------------------------------------*/
 
@@ -166,6 +209,32 @@ app.post("/login" , async(req, res)=>{
             }
         }
     })
+});
+
+app.post("/submit" , async(req , res)=>{
+    const secret = req.body.secret;
+    const user = req.user.id;
+
+    // User.findById(user , (err , foundUser)=>{
+    //     if(err){
+    //         console.log(err);
+    //     }else{
+    //         if(foundUser){
+    //             foundUser.secret = secret;
+    //             foundUser.save(()=>{
+    //                 res.redirect("/secrets");
+    //             });
+    //         }
+    //     }
+    // });
+
+    await User.findById(user).then((foundUser)=>{
+        foundUser.secret = secret;
+            foundUser.save().then(()=>{
+                res.redirect("/secrets")
+        });
+    });
+
 });
 
 app.listen(3000 , ()=>{
